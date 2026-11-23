@@ -498,6 +498,10 @@ $('#addForm').addEventListener('submit', e => {
   if (chk && chk.off && !confirm(`Die Distanz weicht um ${fmt(Math.abs(chk.diff))} km vom Üblichen auf dieser Strecke ab (${fmt(chk.ref)} km).\n\nOhne Zwischenstopp trotzdem speichern?`)) return;
   const f = new FormData(e.target);
   const odoStart = parseFloat(f.get('odoStart')), odoEnd = parseFloat(f.get('odoEnd'));
+  const { next } = neighbors(f.get('date'), f.get('timeStart'), editId);
+  const fixNext = next && odoEnd > next.odoStart && odoEnd < next.odoEnd ? next : null;
+  if (fixNext && !confirm(`Die nachfolgende Fahrt vom ${fmtDate(fixNext.date)} beginnt bei ${fmtOdo(fixNext.odoStart)}.\n\n` +
+      `Ihr Start wird auf ${fmtOdo(odoEnd)} korrigiert, ihre gefahrenen km ändern sich von ${fmt(fixNext.km)} auf ${fmt(fixNext.odoEnd - odoEnd)} km.\n\nSpeichern?`)) return;
   const stops = f.getAll('stop').map(s => s.trim()).filter(Boolean);
   const trip = { id: editId || crypto.randomUUID(), date: f.get('date'), from: f.get('from').trim(), to: f.get('to').trim(),
                stops, roundTrip: f.get('roundTrip') === 'on', detour: stops.length ? f.get('detour').trim() : '',
@@ -506,38 +510,65 @@ $('#addForm').addEventListener('submit', e => {
                km: Math.round((odoEnd - odoStart) * 10) / 10 };
   const wasEdit = !!editId;
   if (wasEdit) trips[trips.findIndex(t => t.id === editId)] = trip; else trips.push(trip);
+  if (fixNext) { fixNext.odoStart = odoEnd; fixNext.km = Math.round((fixNext.odoEnd - odoEnd) * 10) / 10; }
   save(); exitEdit(); render();
   const gaps = missing(trip);
   $('#savedMsg').innerHTML = `<span class="check">✓ ${wasEdit ? 'Geändert' : 'Gespeichert'}:</span> ${fmtDate(trip.date)}, ${esc(routeText(trip))}, ${fmt(trip.km)} km (${trip.cat})`
-    + (gaps.length ? ` <span class="warn">– fehlt noch: ${gaps.join(', ')}</span>` : '');
+    + (gaps.length ? ` <span class="warn">– fehlt noch: ${gaps.join(', ')}</span>` : '')
+    + (fixNext ? `<br>Start der Fahrt vom ${fmtDate(fixNext.date)} auf ${fmtOdo(fixNext.odoStart)} korrigiert (jetzt ${fmt(fixNext.km)} km).` : '');
 });
 
 // Highest recorded end odometer = where the car stands now.
 const lastOdo = () => trips.reduce((m, t) => t.odoEnd != null && t.odoEnd > m ? t.odoEnd : m, -Infinity);
 const fmtOdo = n => n.toLocaleString('de-AT', { maximumFractionDigits:1 }) + ' km';
 
+// Trips are ordered by date + start time; a backdated trip sits between its neighbours.
+const tKey = (date, time) => (date || '') + ' ' + (time || '00:00');
+function neighbors(date, time, excludeId) {
+  const k = tKey(date, time);
+  const list = trips.filter(t => t.id !== excludeId && t.odoEnd != null).sort(byDateTime);
+  let prev = null, next = null;
+  for (const t of list) { if (tKey(t.date, t.timeStart) <= k) prev = t; else { next = t; break; } }
+  return { prev, next };
+}
+let autoStart = true;   // start odometer was filled in by the tool, not typed by the user
+
 function prefillOdo() {
-  const last = lastOdo();
-  $('#addForm').odoStart.value = Number.isFinite(last) ? last : '';
+  const f = $('#addForm');
+  const { prev } = neighbors(f.date.value, f.timeStart.value, null);
+  const last = prev ? prev.odoEnd : lastOdo();
+  f.odoStart.value = Number.isFinite(last) ? last : '';
+  autoStart = true;
   updateForm();
 }
 
 function updateForm() {
   const form = $('#addForm');
   const start = parseFloat(form.odoStart.value), end = parseFloat(form.odoEnd.value);
-  const last = lastOdo();
+  const { prev, next } = neighbors(form.date.value, form.timeStart.value, editId);
   const ok = Number.isFinite(start) && Number.isFinite(end) && end > start;
+  const pastNext = ok && next && end >= next.odoEnd;
   form.odoEnd.setCustomValidity(Number.isFinite(start) && Number.isFinite(end) && !ok
-    ? 'Der Kilometerstand am Ende muss größer sein als am Start.' : '');
+    ? 'Der Kilometerstand am Ende muss größer sein als am Start.'
+    : pastNext ? `Der Kilometerstand am Ende liegt über dem Ende der nachfolgenden Fahrt (${fmtOdo(next.odoEnd)}).` : '');
   $('#kmTotal').textContent = ok ? fmt(end - start) + ' km' : '–';
 
-  let hint = '';
-  if (editId) hint = 'Du bearbeitest eine bestehende Fahrt. Die gefahrenen Kilometer werden aus den Kilometerständen neu berechnet.';
-  else if (!Number.isFinite(last)) hint = 'Erste Fahrt mit Kilometerstand: bitte den Start-Kilometerstand vom Tacho eintragen.';
-  else if (!Number.isFinite(start)) hint = '';
-  else if (start === last) hint = `Start übernommen vom letzten Kilometerstand (${fmtOdo(last)}).`;
-  else if (start > last) hint = `<span class="warn">Lücke von ${fmt(start - last)} km</span> seit dem letzten Kilometerstand (${fmtOdo(last)}). Fehlt eine Fahrt?`;
-  else hint = `<span class="warn">Achtung:</span> Start liegt unter dem letzten Kilometerstand (${fmtOdo(last)}).`;
+  const parts = [];
+  if (editId) parts.push('Du bearbeitest eine bestehende Fahrt. Die gefahrenen Kilometer werden aus den Kilometerständen neu berechnet.');
+  if (!prev && !next) { if (!editId) parts.push('Erste Fahrt mit Kilometerstand: bitte den Start-Kilometerstand vom Tacho eintragen.'); }
+  else if (Number.isFinite(start) && prev) {
+    const pe = prev.odoEnd, when = `der Fahrt vom ${fmtDate(prev.date)}`;
+    if (start === pe) parts.push(`Start übernommen vom Ende ${when} (${fmtOdo(pe)}).`);
+    else if (start > pe) parts.push(`<span class="warn">Lücke von ${fmt(start - pe)} km</span> seit dem Ende ${when} (${fmtOdo(pe)}). Fehlt eine Fahrt?`);
+    else parts.push(`<span class="warn">Achtung:</span> Start liegt unter dem Ende ${when} (${fmtOdo(pe)}).`);
+  }
+  if (next && ok) {
+    const when = `Fahrt vom ${fmtDate(next.date)}`;
+    if (pastNext) parts.push(`<span class="warn">Ende liegt über dem Ende der nachfolgenden ${when} (${fmtOdo(next.odoEnd)}).</span> Bitte Datum und Kilometerstände prüfen.`);
+    else if (end > next.odoStart) parts.push(`<strong>Nachtrag:</strong> Die nachfolgende ${when} beginnt bei ${fmtOdo(next.odoStart)}. Beim Speichern wird ihr Start auf ${fmtOdo(end)} korrigiert (${fmt(next.km)} → ${fmt(next.odoEnd - end)} km).`);
+    else parts.push(`Nachtrag vor der ${when} (Start ${fmtOdo(next.odoStart)}) – passt in die Lücke.`);
+  }
+  let hint = parts.join(' ');
   if (Number.isFinite(start) && Number.isFinite(end) && !ok) hint = '<span class="warn">Kilometerstand Ende muss größer als Start sein.</span>';
   $('#odoHint').innerHTML = hint;
   $('#detourWrap').hidden = !$('#stops').children.length;
@@ -604,7 +635,12 @@ $('#addStop').addEventListener('click', () => {
   });
   $('#stops').appendChild(div); div.querySelector('input').focus(); updateForm();
 });
-$('#addForm').addEventListener('input', updateForm);
+$('#addForm').addEventListener('input', e => {
+  const n = e.target.name;
+  if (n === 'odoStart') autoStart = false;
+  if ((n === 'date' || n === 'timeStart') && !editId && autoStart) { prefillOdo(); return; }
+  updateForm();
+});
 document.addEventListener('click', e => {
   const del = e.target.closest('.del');
   const ed = e.target.closest('[data-edit]');
