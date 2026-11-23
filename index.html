@@ -151,7 +151,7 @@
   </section>
 
   <section class="card">
-    <h2>Tankung eintragen</h2>
+    <h2 id="fuelFormTitle">Tankung eintragen</h2>
     <form class="add" id="fuelForm">
       <div class="grid g4">
         <label>Datum<input type="date" name="date" required></label>
@@ -160,7 +160,8 @@
         <label>Tankstelle / Ort (optional)<input name="station" placeholder="z. B. OMV Wien-Nord"></label>
       </div>
       <div class="row" style="align-items:center">
-        <button type="submit">Tankung hinzufügen</button>
+        <button type="submit" id="fuelSubmit">Tankung hinzufügen</button>
+        <button type="button" class="ghost" id="fuelCancel" hidden>Abbrechen</button>
         <span class="total">Preis pro Liter:&nbsp;<strong id="fuelPrice">–</strong></span>
       </div>
     </form>
@@ -368,7 +369,7 @@ function renderFuel() {
   ].map(([l, v]) => `<div class="stat"><div class="v">${v}</div><div class="l">${l}</div></div>`).join('');
   const row = x => `<tr><td>${fmtDate(x.date)}</td><td>${esc(x.station)}</td>
       <td class="num">${num(x.liters)}</td><td class="num">${eur(x.cost)}</td><td class="num">${num(x.cost / x.liters, 3)}</td>
-      <td><button class="del" data-fuel-id="${x.id}" aria-label="Tankung löschen">✕</button></td></tr>`;
+      <td class="actions"><button class="edit" data-fuel-edit="${x.id}" aria-label="Tankung bearbeiten">✎</button><button class="del" data-fuel-id="${x.id}" aria-label="Tankung löschen">✕</button></td></tr>`;
   const sumRow = (label, xs, cls) => { const l = xs.reduce((s, x) => s + x.liters, 0), c = xs.reduce((s, x) => s + x.cost, 0);
     return `<tr class="${cls}"><td colspan="2">${label} (${xs.length} Tankungen)</td><td class="num">${num(l)}</td><td class="num">${eur(c)}</td>
       <td class="num">${l ? num(c / l, 3) : ''}</td><td></td></tr>`; };
@@ -606,7 +607,9 @@ document.addEventListener('click', e => {
   const del = e.target.closest('.del');
   const ed = e.target.closest('[data-edit]');
   if (ed) { startEdit(ed.dataset.edit); return; }
-  if (del?.dataset.fuelId) { if (!confirm('Diese Tankung löschen?')) return; fuel = fuel.filter(x => x.id !== del.dataset.fuelId); saveFuel(); render(); return; }
+  const fe = e.target.closest('[data-fuel-edit]');
+  if (fe) { startFuelEdit(fe.dataset.fuelEdit); return; }
+  if (del?.dataset.fuelId) { if (!confirm('Diese Tankung löschen?')) return; const fid = del.dataset.fuelId; fuel = fuel.filter(x => x.id !== fid); saveFuel(); if (fuelEditId === fid) exitFuelEdit(); render(); return; }
   if (del?.dataset.id) {
     const t = trips.find(x => x.id === del.dataset.id);
     if (!t || !confirm(`Fahrt vom ${fmtDate(t.date)} (${routeText(t)}, ${fmt(t.km)} km) löschen?`)) return;
@@ -666,11 +669,34 @@ $('#csvBtn').addEventListener('click', () => {
 $('#fuelForm').addEventListener('submit', e => {
   e.preventDefault();
   const f = new FormData(e.target);
-  const x = { id: crypto.randomUUID(), date: f.get('date'), station: f.get('station').trim(),
+  const x = { id: fuelEditId || crypto.randomUUID(), date: f.get('date'), station: f.get('station').trim(),
               liters: Math.round(parseFloat(f.get('liters')) * 100) / 100, cost: Math.round(parseFloat(f.get('cost')) * 100) / 100 };
-  fuel.push(x); saveFuel(); e.target.reset(); e.target.date.valueAsDate = new Date(); $('#fuelPrice').textContent = '–'; render();
-  $('#fuelMsg').innerHTML = `<span class="check">✓ Gespeichert:</span> ${fmtDate(x.date)}, ${num(x.liters)} l für ${eur(x.cost)} (${num(x.cost / x.liters, 3)} €/l)`;
+  const wasEdit = !!fuelEditId;
+  if (wasEdit) fuel[fuel.findIndex(o => o.id === fuelEditId)] = x; else fuel.push(x);
+  saveFuel(); exitFuelEdit(); render();
+  $('#fuelMsg').innerHTML = `<span class="check">✓ ${wasEdit ? 'Geändert' : 'Gespeichert'}:</span> ${fmtDate(x.date)}, ${num(x.liters)} l für ${eur(x.cost)} (${num(x.cost / x.liters, 3)} €/l)`;
 });
+
+let fuelEditId = null;
+function startFuelEdit(id) {
+  const x = fuel.find(o => o.id === id); if (!x) return;
+  const f = $('#fuelForm');
+  fuelEditId = id;
+  f.date.value = x.date; f.liters.value = x.liters; f.cost.value = x.cost; f.station.value = x.station || '';
+  f.dispatchEvent(new Event('input'));
+  $('#fuelFormTitle').textContent = `Tankung bearbeiten (${fmtDate(x.date)})`;
+  $('#fuelSubmit').textContent = 'Änderungen speichern';
+  $('#fuelCancel').hidden = false; f.classList.add('editing'); $('#fuelMsg').textContent = '';
+  showTab('eintragen');
+  $('#fuelFormTitle').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+}
+function exitFuelEdit() {
+  fuelEditId = null;
+  const f = $('#fuelForm');
+  f.reset(); f.classList.remove('editing'); f.date.valueAsDate = new Date(); $('#fuelPrice').textContent = '–';
+  $('#fuelFormTitle').textContent = 'Tankung eintragen'; $('#fuelSubmit').textContent = 'Tankung hinzufügen'; $('#fuelCancel').hidden = true;
+}
+$('#fuelCancel').addEventListener('click', () => { exitFuelEdit(); $('#fuelMsg').textContent = 'Bearbeitung abgebrochen, nichts geändert.'; });
 $('#fuelForm').addEventListener('input', () => {
   const f = $('#fuelForm'), l = parseFloat(f.liters.value), c = parseFloat(f.cost.value);
   $('#fuelPrice').textContent = l > 0 && c > 0 ? num(c / l, 3) + ' €/l' : '–';
