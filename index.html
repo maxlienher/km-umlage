@@ -316,9 +316,11 @@ function allocate(method) {
 const fmtDate = d => d ? d.split('-').reverse().join('.') : '';
 const byDateTime = (x, y) => (x.date + (x.timeStart || '')).localeCompare(y.date + (y.timeStart || ''));
 const timeSpan = t => t.timeStart ? `${t.timeStart}–${t.timeEnd || '?'}` : '';
-const routeText = t => [t.from, ...(t.stops || []), t.to].filter(Boolean).join(' → ') + (t.roundTrip ? ' (hin & retour)' : '');
-const routeHtml = t => `${[t.from, ...(t.stops || []), t.to].filter(Boolean).map(esc).join(' → ')}
-  ${t.roundTrip ? `<span class="rt">⇄ hin & retour</span>` : ''}
+// Route as A-B, with stops A-S-B; round trip goes back to the start: A-B-A.
+const routePoints = t => { const p = [t.from, ...(t.stops || []), t.to].map(v => String(v || '').trim()).filter(Boolean);
+  return t.roundTrip && p.length ? [...p, p[0]] : p; };
+const routeText = t => routePoints(t).join('-');
+const routeHtml = t => `${routePoints(t).map(esc).join('-')}
   ${t.detour ? `<span class="sub-note">Umweg: ${esc(t.detour)}</span>` : ''}`;
 // --- Plausibility: same route without stops should have about the same distance ---
 const ROUTE_TOL_PCT = 10, ROUTE_TOL_KM = 3;   // flag if off by more than 10 % and more than 3 km
