@@ -70,6 +70,9 @@
   .routecheck { background:#fef3c7; color:#78350f; border:1px solid #f59e0b; border-radius:10px; padding:10px 12px; font-size:14px; }
   .routecheck.ok { background:transparent; color:var(--muted); border-color:var(--line); }
   .flag { display:block; font-size:12px; color:#b45309; font-weight:600; }
+  button.edit { background:transparent; color:var(--a); border:none; padding:4px 8px; min-height:auto; font-size:16px; }
+  td.actions { white-space:nowrap; }
+  form.editing { outline:3px solid var(--a); outline-offset:8px; border-radius:6px; }
   .reminder { background:#fef3c7; color:#78350f; border:1px solid #f59e0b; border-radius:var(--radius); padding:12px 16px; margin-bottom:16px; display:flex; gap:12px; align-items:center; justify-content:space-between; flex-wrap:wrap; }
   .reminder button { background:#78350f; }
   button, select, input, label { touch-action: manipulation; }
@@ -108,12 +111,12 @@
 
   <div class="panel active" id="panel-eintragen">
   <section class="card">
-    <h2>Fahrt eintragen</h2>
+    <h2 id="formTitle">Fahrt eintragen</h2>
     <form class="add" id="addForm">
       <div class="grid g4e">
         <label>Datum<input type="date" name="date" required></label>
-        <label>Uhrzeit Start<input type="time" name="timeStart" required></label>
-        <label>Uhrzeit Ende<input type="time" name="timeEnd" required></label>
+        <label>Uhrzeit Start<input type="time" name="timeStart"></label>
+        <label>Uhrzeit Ende<input type="time" name="timeEnd"></label>
         <label>Kategorie<select name="cat"><option>A</option><option>B</option></select></label>
       </div>
       <label>Zweck<input name="purpose" placeholder="z. B. Kundentermin"></label>
@@ -138,7 +141,11 @@
       <p class="note" id="odoHint" style="margin:0"></p>
       <div class="routecheck" id="routeHint" hidden></div>
 
-      <button type="submit">Hinzufügen</button>
+      <p class="note" style="margin:0">Fehlt dir eine Angabe (z. B. Uhrzeit oder Zweck), speichere trotzdem. Die Fahrt wird als unvollständig markiert, und du kannst sie später mit ✎ ergänzen.</p>
+      <div class="row">
+        <button type="submit" id="submitBtn">Hinzufügen</button>
+        <button type="button" class="ghost" id="cancelEdit" hidden>Abbrechen</button>
+      </div>
     </form>
     <p class="note" id="savedMsg"></p>
   </section>
@@ -332,11 +339,12 @@ function routeCheck(t, excludeId) {
 const flagNote = t => { const c = routeCheck(t, t.id);
   return c && c.off ? `<span class="flag" title="Üblich auf dieser Strecke: ${fmt(c.ref)} km">⚠ ${c.diff > 0 ? '+' : ''}${fmt(c.diff)} km ggü. üblich (${fmt(c.ref)} km)</span>` : ''; };
 
+const missing = t => [!t.timeStart || !t.timeEnd ? 'Uhrzeit' : '', !String(t.purpose || '').trim() ? 'Zweck' : '', t.odoEnd == null ? 'Kilometerstand' : ''].filter(Boolean);
 const tripRow = (t, share) => `<tr>
-  <td>${fmtDate(t.date)}${t.timeStart ? `<span class="sub-note">${timeSpan(t)}</span>` : ''}</td><td>${routeHtml(t)}</td><td>${esc(t.purpose)}</td>
+  <td>${fmtDate(t.date)}${t.timeStart ? `<span class="sub-note">${timeSpan(t)}</span>` : ''}${missing(t).length ? `<span class="flag">⚠ fehlt: ${missing(t).join(', ')}</span>` : ''}</td><td>${routeHtml(t)}</td><td>${esc(t.purpose)}</td>
   <td><span class="tag ${t.cat}">${t.cat}</span></td><td class="num">${fmt(t.km)}${flagNote(t)}${t.odoEnd != null ? `<span class="sub-note">${fmtOdo(t.odoStart)} → ${fmtOdo(t.odoEnd)}</span>` : ''}</td>
   ${share ? `<td class="num alloc">${t.cat === 'A' ? '+ ' + fmt(share.get(t.id) || 0) : '→ umgelegt'}</td>` : ''}
-  <td><button class="del" data-id="${t.id}" aria-label="Fahrt löschen">✕</button></td></tr>`;
+  <td class="actions"><button class="edit" data-edit="${t.id}" aria-label="Fahrt bearbeiten">✎</button><button class="del" data-id="${t.id}" aria-label="Fahrt löschen">✕</button></td></tr>`;
 
 // Group items (sorted) into [[monthKey, items], ...] in chronological order.
 function byMonth(items) {
@@ -457,7 +465,9 @@ function render() {
   const lit = v => v != null ? num(v) + ' l' : '';
   const cur = v => v != null ? eur(v) : '';
   const blockHtml = b => {
+    const inc = trips.filter(t => mKey(t.date) === b.month && missing(t).length).length;
     const notes = [
+      inc ? `<span class="warn">${inc} Fahrt${inc > 1 ? 'en' : ''} in diesem Monat unvollständig</span> – im Tab „Fahrten“ mit ✎ ergänzen, bevor du abgibst.` : '',
       b.unalloc ? `${fmt(b.unalloc)} B-km nicht umlegbar (keine A-Fahrt in diesem Monat).` : '',
       b.unassignedFuel.count ? `Nicht in der Tabelle: ${b.unassignedFuel.count} Tankung(en) an Tagen ohne A-Fahrt, zusammen ${num(b.unassignedFuel.liters)} l für ${eur(b.unassignedFuel.cost)} (siehe Tab „Tankungen“).` : ''
     ].filter(Boolean).map(t => `<p class="note">${t}</p>`).join('');
@@ -481,20 +491,22 @@ function render() {
 
 $('#addForm').addEventListener('submit', e => {
   e.preventDefault();
-  const chk = routeCheck(formTrip(), null);
+  const chk = routeCheck(formTrip(), editId);
   if (chk && chk.off && !confirm(`Die Distanz weicht um ${fmt(Math.abs(chk.diff))} km vom Üblichen auf dieser Strecke ab (${fmt(chk.ref)} km).\n\nOhne Zwischenstopp trotzdem speichern?`)) return;
   const f = new FormData(e.target);
   const odoStart = parseFloat(f.get('odoStart')), odoEnd = parseFloat(f.get('odoEnd'));
   const stops = f.getAll('stop').map(s => s.trim()).filter(Boolean);
-  trips.push({ id: crypto.randomUUID(), date: f.get('date'), from: f.get('from').trim(), to: f.get('to').trim(),
+  const trip = { id: editId || crypto.randomUUID(), date: f.get('date'), from: f.get('from').trim(), to: f.get('to').trim(),
                stops, roundTrip: f.get('roundTrip') === 'on', detour: stops.length ? f.get('detour').trim() : '',
                timeStart: f.get('timeStart'), timeEnd: f.get('timeEnd'),
                purpose: f.get('purpose').trim(), cat: f.get('cat'), odoStart, odoEnd,
-               km: Math.round((odoEnd - odoStart) * 10) / 10 });
-  const last = trips[trips.length - 1];
-  save(); e.target.reset(); $('#stops').innerHTML = '';
-  e.target.date.valueAsDate = new Date(); prefillOdo(); render();
-  $('#savedMsg').innerHTML = `<span class="check">✓ Gespeichert:</span> ${fmtDate(last.date)}, ${esc(routeText(last))}, ${fmt(last.km)} km (${last.cat})`;
+               km: Math.round((odoEnd - odoStart) * 10) / 10 };
+  const wasEdit = !!editId;
+  if (wasEdit) trips[trips.findIndex(t => t.id === editId)] = trip; else trips.push(trip);
+  save(); exitEdit(); render();
+  const gaps = missing(trip);
+  $('#savedMsg').innerHTML = `<span class="check">✓ ${wasEdit ? 'Geändert' : 'Gespeichert'}:</span> ${fmtDate(trip.date)}, ${esc(routeText(trip))}, ${fmt(trip.km)} km (${trip.cat})`
+    + (gaps.length ? ` <span class="warn">– fehlt noch: ${gaps.join(', ')}</span>` : '');
 });
 
 // Highest recorded end odometer = where the car stands now.
@@ -517,7 +529,8 @@ function updateForm() {
   $('#kmTotal').textContent = ok ? fmt(end - start) + ' km' : '–';
 
   let hint = '';
-  if (!Number.isFinite(last)) hint = 'Erste Fahrt mit Kilometerstand: bitte den Start-Kilometerstand vom Tacho eintragen.';
+  if (editId) hint = 'Du bearbeitest eine bestehende Fahrt. Die gefahrenen Kilometer werden aus den Kilometerständen neu berechnet.';
+  else if (!Number.isFinite(last)) hint = 'Erste Fahrt mit Kilometerstand: bitte den Start-Kilometerstand vom Tacho eintragen.';
   else if (!Number.isFinite(start)) hint = '';
   else if (start === last) hint = `Start übernommen vom letzten Kilometerstand (${fmtOdo(last)}).`;
   else if (start > last) hint = `<span class="warn">Lücke von ${fmt(start - last)} km</span> seit dem letzten Kilometerstand (${fmtOdo(last)}). Fehlt eine Fahrt?`;
@@ -526,7 +539,7 @@ function updateForm() {
   $('#odoHint').innerHTML = hint;
   $('#detourWrap').hidden = !$('#stops').children.length;
 
-  const c = ok ? routeCheck(formTrip(), null) : null;
+  const c = ok ? routeCheck(formTrip(), editId) : null;
   const rh = $('#routeHint');
   rh.hidden = !c;
   if (c) {
@@ -537,6 +550,37 @@ function updateForm() {
       : `✓ Passt zu bisherigen Fahrten auf dieser Strecke (üblich ${fmt(c.ref)} km${per}).`;
   }
 }
+
+let editId = null;
+
+function setStops(list) {
+  $('#stops').innerHTML = '';
+  list.forEach(v => { $('#addStop').click(); const ins = $('#stops').querySelectorAll('[name=stop]'); ins[ins.length - 1].value = v; });
+}
+
+function startEdit(id) {
+  const t = trips.find(x => x.id === id); if (!t) return;
+  const f = $('#addForm');
+  editId = id;
+  f.date.value = t.date; f.timeStart.value = t.timeStart || ''; f.timeEnd.value = t.timeEnd || '';
+  f.cat.value = t.cat; f.purpose.value = t.purpose || ''; f.from.value = t.from || ''; f.to.value = t.to || '';
+  setStops(t.stops || []); f.detour.value = t.detour || ''; f.roundTrip.checked = !!t.roundTrip;
+  f.odoStart.value = t.odoStart ?? ''; f.odoEnd.value = t.odoEnd ?? '';
+  $('#formTitle').textContent = `Fahrt bearbeiten (${fmtDate(t.date)})`;
+  $('#submitBtn').textContent = 'Änderungen speichern';
+  $('#cancelEdit').hidden = false; f.classList.add('editing'); $('#savedMsg').textContent = '';
+  showTab('eintragen'); updateForm();
+  $('#formTitle').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+}
+
+function exitEdit() {
+  editId = null;
+  const f = $('#addForm');
+  f.reset(); $('#stops').innerHTML = ''; f.classList.remove('editing');
+  $('#formTitle').textContent = 'Fahrt eintragen'; $('#submitBtn').textContent = 'Hinzufügen'; $('#cancelEdit').hidden = true;
+  f.date.valueAsDate = new Date(); prefillOdo();
+}
+$('#cancelEdit').addEventListener('click', () => { exitEdit(); $('#savedMsg').textContent = 'Bearbeitung abgebrochen, nichts geändert.'; });
 
 function formTrip() {
   const f = $('#addForm');
@@ -560,8 +604,16 @@ $('#addStop').addEventListener('click', () => {
 $('#addForm').addEventListener('input', updateForm);
 document.addEventListener('click', e => {
   const del = e.target.closest('.del');
-  if (del?.dataset.fuelId) { fuel = fuel.filter(x => x.id !== del.dataset.fuelId); saveFuel(); render(); return; }
-  if (del?.dataset.id) { trips = trips.filter(t => t.id !== del.dataset.id); save(); prefillOdo(); render(); return; }
+  const ed = e.target.closest('[data-edit]');
+  if (ed) { startEdit(ed.dataset.edit); return; }
+  if (del?.dataset.fuelId) { if (!confirm('Diese Tankung löschen?')) return; fuel = fuel.filter(x => x.id !== del.dataset.fuelId); saveFuel(); render(); return; }
+  if (del?.dataset.id) {
+    const t = trips.find(x => x.id === del.dataset.id);
+    if (!t || !confirm(`Fahrt vom ${fmtDate(t.date)} (${routeText(t)}, ${fmt(t.km)} km) löschen?`)) return;
+    trips = trips.filter(x => x.id !== t.id); save();
+    if (editId === t.id) exitEdit(); else if (!editId) prefillOdo();
+    render(); return;
+  }
   const go = e.target.closest('[data-tab], [data-goto]');
   if (go) showTab(go.dataset.tab || go.dataset.goto);
 });
