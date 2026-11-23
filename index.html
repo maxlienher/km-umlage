@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kilometer-Umlage (transparent)</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --text:#1c1c1e; --muted:#6b6b70; --line:#e2e3e7;
+          --a:#2563eb; --b:#d97706; --ok:#15803d; --radius:12px; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#111214; --card:#1c1d20; --text:#f2f2f4; --muted:#9a9aa0; --line:#2e2f33; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.45 -apple-system, system-ui, "Segoe UI", sans-serif; background:var(--bg); color:var(--text); }
+  main { max-width:1100px; margin:0 auto; padding:24px 16px 64px; }
+  h1 { font-size:24px; margin:0 0 4px; }
+  h2 { font-size:17px; margin:0 0 12px; }
+  p.sub { color:var(--muted); margin:0 0 20px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:16px; margin-bottom:16px; }
+  form.add { display:flex; flex-direction:column; gap:12px; }
+  .grid { display:grid; gap:8px; }
+  .g3 { grid-template-columns: 1fr 1fr 2fr; }
+  .g4 { grid-template-columns: 1fr 1fr 1fr 2fr; }
+  .g4e { grid-template-columns: 1.3fr 1fr 1fr 1fr; }
+  @media (max-width: 700px) { .g3, .g4 { grid-template-columns: 1fr; } .g4e { grid-template-columns: 1fr 1fr; } }
+  .route { display:flex; flex-direction:column; gap:8px; padding:12px; border:1px dashed var(--line); border-radius:10px; }
+  .stop { display:flex; gap:8px; align-items:end; padding-left:16px; border-left:3px solid var(--b); }
+  .stop label { flex:1; }
+  button.small { align-self:flex-start; min-height:36px; padding:4px 12px; font-size:14px; }
+  .checkline { flex-direction:row; align-items:center; gap:8px; font-size:15px; color:var(--text); min-height:40px; }
+  .checkline input { width:20px; height:20px; min-height:auto; }
+  .total { min-height:40px; display:flex; align-items:center; font-size:15px; }
+  .sub-note { display:block; font-size:12px; color:var(--muted); }
+  .rt { font-size:12px; font-weight:600; color:var(--a); white-space:nowrap; }
+  label { display:flex; flex-direction:column; font-size:12px; color:var(--muted); gap:4px; }
+  input, select, button { font:inherit; padding:8px 10px; border-radius:8px; border:1px solid var(--line); background:var(--bg); color:var(--text); min-height:40px; }
+  button { cursor:pointer; background:var(--a); color:#fff; border:none; font-weight:600; }
+  button.ghost { background:transparent; color:var(--text); border:1px solid var(--line); font-weight:500; }
+  button.del { background:transparent; color:var(--muted); border:none; padding:4px 8px; min-height:auto; }
+  table { width:100%; border-collapse:collapse; font-variant-numeric: tabular-nums; }
+  th, td { text-align:left; padding:8px 6px; border-bottom:1px solid var(--line); }
+  th { font-size:12px; color:var(--muted); font-weight:600; }
+  td.num, th.num { text-align:right; }
+  .tag { display:inline-block; padding:1px 8px; border-radius:99px; font-size:12px; font-weight:600; color:#fff; }
+  .tag.A { background:var(--a); } .tag.B { background:var(--b); }
+  .alloc { color:var(--b); font-weight:600; }
+  .stats { display:grid; grid-template-columns: repeat(auto-fit, minmax(160px,1fr)); gap:12px; }
+  .stat { border:1px solid var(--line); border-radius:10px; padding:12px; }
+  .stat .v { font-size:22px; font-weight:700; font-variant-numeric: tabular-nums; }
+  .stat .l { font-size:12px; color:var(--muted); }
+  .row { display:flex; gap:12px; flex-wrap:wrap; align-items:end; }
+  .note { font-size:13px; color:var(--muted); margin-top:10px; }
+  .check { color:var(--ok); font-weight:600; }
+  .warn { color:#b91c1c; font-weight:600; }
+  .empty { color:var(--muted); padding:12px 0; }
+  .tabs { display:flex; gap:4px; background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:4px; margin-bottom:16px; position:sticky; top:8px; z-index:5; }
+  .tab { flex:1; background:transparent; color:var(--text); font-weight:600; }
+  .tab.active { background:var(--a); color:#fff; }
+  .count { display:inline-block; min-width:22px; padding:0 6px; border-radius:99px; background:var(--line); color:var(--text); font-size:12px; }
+  .tab.active .count { background:rgba(255,255,255,.25); color:#fff; }
+  .panel { display:none; } .panel.active { display:block; }
+  tfoot td { font-weight:700; }
+  .monthbar { display:flex; gap:8px; align-items:center; justify-content:center; margin:-4px 0 16px; }
+  .monthbar select { font-weight:700; font-size:17px; min-width:220px; text-align:center; }
+  .monthbar button { min-width:44px; font-size:20px; padding:4px 12px; }
+  tr.mhead td { background:var(--bg); font-weight:700; font-size:16px; padding-top:16px; }
+  tr.msum td { font-weight:700; border-bottom:2px solid var(--text); }
+  h3.month { font-size:17px; margin:24px 0 8px; }
+  [hidden] { display:none !important; }
+  button, select, input, label { touch-action: manipulation; }
+  .tabs { display:grid; grid-template-columns: repeat(4, 1fr); }
+  .tab { padding:8px 4px; min-height:44px; white-space:nowrap; -webkit-tap-highlight-color: transparent; }
+  .noscript { background:#b91c1c; color:#fff; padding:16px; border-radius:var(--radius); margin-bottom:16px; font-weight:600; }
+  @media (max-width: 520px) {
+    main { padding:16px 12px 48px; }
+    h1 { font-size:22px; } p.sub { font-size:14px; }
+    .tab { font-size:13px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; }
+    .count { font-size:11px; min-width:18px; }
+    .monthbar select { min-width:0; flex:1; font-size:16px; }
+    .card { padding:12px; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Kilometer-Umlage</h1>
+  <p class="sub">Fahrten erfassen (Kategorie A oder B). B-Kilometer werden nach einem offenen Schlüssel auf A-Fahrten umgelegt, und jede Umlage bleibt sichtbar ausgewiesen.</p>
+
+  <noscript><div class="noscript">Dieses Programm läuft hier nicht, weil JavaScript nicht ausgeführt wird. Das passiert in Vorschauen (z. B. WhatsApp, Mail, Dateien-App). Öffne die Datei in einem echten Browser wie Safari, Chrome oder Firefox.</div></noscript>
+  <nav class="tabs" role="tablist">
+    <button class="tab active" data-tab="eintragen" role="tab">Eintragen</button>
+    <button class="tab" data-tab="fahrten" role="tab">Fahrten <span class="count" id="tripCount">0</span></button>
+    <button class="tab" data-tab="tankungen" role="tab">Tankungen <span class="count" id="fuelCount">0</span></button>
+    <button class="tab" data-tab="umlage" role="tab">Umlage</button>
+  </nav>
+
+  <div class="monthbar" id="monthBar" hidden>
+    <button class="ghost" id="prevMonth" aria-label="Vorheriger Monat">‹</button>
+    <select id="month" aria-label="Monat"></select>
+    <button class="ghost" id="nextMonth" aria-label="Nächster Monat">›</button>
+  </div>
+
+  <div class="panel active" id="panel-eintragen">
+  <section class="card">
+    <h2>Fahrt eintragen</h2>
+    <form class="add" id="addForm">
+      <div class="grid g4e">
+        <label>Datum<input type="date" name="date" required></label>
+        <label>Uhrzeit Start<input type="time" name="timeStart" required></label>
+        <label>Uhrzeit Ende<input type="time" name="timeEnd" required></label>
+        <label>Kategorie<select name="cat"><option>A</option><option>B</option></select></label>
+      </div>
+      <label>Zweck<input name="purpose" placeholder="z. B. Kundentermin"></label>
+
+      <div class="route">
+        <label>Von<input name="from" placeholder="z. B. Wien" required></label>
+        <div id="stops"></div>
+        <button type="button" class="ghost small" id="addStop">+ Zwischenstopp</button>
+        <label>Nach<input name="to" placeholder="z. B. Linz" required></label>
+      </div>
+
+      <label id="detourWrap" hidden>Grund für Umweg / Zwischenstopp
+        <input name="detour" placeholder="z. B. Baustelle, Unterlagen abholen, Kollegin mitgenommen">
+      </label>
+
+      <div class="grid g4" style="align-items:end">
+        <label>Kilometerstand Start<input type="number" name="odoStart" min="0" step="any" required></label>
+        <label>Kilometerstand Ende<input type="number" name="odoEnd" min="0" step="any" required></label>
+        <label class="checkline"><input type="checkbox" name="roundTrip"> Hin und retour</label>
+        <div class="total">Gefahren:&nbsp;<strong id="kmTotal">–</strong></div>
+      </div>
+      <p class="note" id="odoHint" style="margin:0"></p>
+
+      <button type="submit">Hinzufügen</button>
+    </form>
+    <p class="note" id="savedMsg"></p>
+  </section>
+
+  <section class="card">
+    <h2>Tankung eintragen</h2>
+    <form class="add" id="fuelForm">
+      <div class="grid g4">
+        <label>Datum<input type="date" name="date" required></label>
+        <label>Liter<input type="number" name="liters" min="0.01" step="0.01" required></label>
+        <label>Gesamtkosten (€)<input type="number" name="cost" min="0.01" step="0.01" required></label>
+        <label>Tankstelle / Ort (optional)<input name="station" placeholder="z. B. OMV Wien-Nord"></label>
+      </div>
+      <div class="row" style="align-items:center">
+        <button type="submit">Tankung hinzufügen</button>
+        <span class="total">Preis pro Liter:&nbsp;<strong id="fuelPrice">–</strong></span>
+      </div>
+    </form>
+    <p class="note" id="fuelMsg"></p>
+  </section>
+
+  <section class="card">
+    <h2>Zuletzt eingetragen</h2>
+    <div id="recentTable"></div>
+    <div class="row" style="margin-top:12px">
+      <button class="ghost" data-goto="fahrten">Alle Fahrten als Tabelle ansehen →</button>
+    </div>
+  </section>
+  </div>
+
+  <div class="panel" id="panel-fahrten">
+  <section class="card">
+    <div class="row" style="justify-content:space-between; margin-bottom:12px">
+      <h2 style="margin:0" id="tripsTitle">Fahrten</h2>
+      <label>Anzeigen
+        <select id="filter"><option value="all">Alle</option><option value="A">Nur A</option><option value="B">Nur B</option></select>
+      </label>
+    </div>
+    <div id="tripTable" style="overflow-x:auto"></div>
+    <div class="row" style="margin-top:12px">
+      <button class="ghost" id="demoBtn">Beispieldaten laden</button>
+      <button class="ghost" id="clearBtn">Alle löschen</button>
+    </div>
+  </section>
+  </div>
+
+  <div class="panel" id="panel-tankungen">
+  <section class="card">
+    <h2 id="fuelTitle">Tankungen</h2>
+    <div class="stats" id="fuelStats"></div>
+    <p class="note">Ø Verbrauch und Kosten pro km = alle getankten Liter bzw. Kosten ÷ alle erfassten Kilometer (A und B). Je vollständiger Fahrten und Tankungen erfasst sind, desto genauer.</p>
+    <div id="fuelTable" style="overflow-x:auto; margin-top:12px"></div>
+  </section>
+  </div>
+
+  <div class="panel" id="panel-umlage">
+  <section class="card">
+    <h2 id="allocTitle">Umlage</h2>
+    <div class="row">
+      <label>Verteilungsschlüssel
+        <select id="method">
+          <option value="prop">Proportional zu A-Kilometern</option>
+          <option value="equal">Gleich pro A-Fahrt</option>
+        </select>
+      </label>
+    </div>
+    <p class="note" id="methodNote"></p>
+    <p class="note">Umgelegt wird immer nur innerhalb eines Monats: B-Kilometer eines Monats gehen nur auf A-Fahrten desselben Monats. So ändert sich eine abgegebene Monatsabrechnung nicht, wenn später Fahrten dazukommen. Tankungen werden der ersten A-Fahrt am selben Tag zugeordnet.</p>
+    <div class="stats" id="stats" style="margin-top:12px"></div>
+    <div id="allocTable" style="margin-top:16px; overflow-x:auto"></div>
+    <div class="row" style="margin-top:12px">
+      <button class="ghost" id="csvBtn">Als CSV exportieren</button>
+    </div>
+  </section>
+  </div>
+</main>
+
+<script>
+const KEY = 'km-umlage-v1';
+let trips = JSON.parse(localStorage.getItem(KEY) || '[]');
+const $ = s => document.querySelector(s);
+const fmt = n => n.toLocaleString('de-AT', { minimumFractionDigits:1, maximumFractionDigits:1 });
+const pct = n => n.toLocaleString('de-AT', { minimumFractionDigits:1, maximumFractionDigits:1 }) + ' %';
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const save = () => localStorage.setItem(KEY, JSON.stringify(trips));
+const FUEL_KEY = 'km-umlage-fuel-v1';
+let fuel = JSON.parse(localStorage.getItem(FUEL_KEY) || '[]');
+const saveFuel = () => localStorage.setItem(FUEL_KEY, JSON.stringify(fuel));
+const eur = n => n.toLocaleString('de-AT', { style:'currency', currency:'EUR' });
+const num = (n, d = 2) => n.toLocaleString('de-AT', { minimumFractionDigits:d, maximumFractionDigits:d });
+
+const NOTES = {
+  prop:  'Jede A-Fahrt trägt einen Anteil der B-Kilometer des Monats im Verhältnis ihrer eigenen Länge. Längere Fahrten tragen mehr.',
+  equal: 'Jede A-Fahrt trägt denselben Anteil der B-Kilometer des Monats, unabhängig von ihrer Länge.'
+};
+
+// Distribute `total` (in 0.1 km units) across weights with largest-remainder rounding,
+// so the rounded shares add up exactly to the total.
+function distribute(total, weights) {
+  const units = Math.round(total * 10);
+  const wsum = weights.reduce((a, b) => a + b, 0);
+  if (!wsum) return weights.map(() => 0);
+  const raw = weights.map(w => units * w / wsum);
+  const floor = raw.map(Math.floor);
+  let rest = units - floor.reduce((a, b) => a + b, 0);
+  raw.map((r, i) => [r - floor[i], i]).sort((x, y) => y[0] - x[0])
+     .slice(0, rest).forEach(([, i]) => floor[i]++);
+  return floor.map(u => u / 10);
+}
+
+// --- Months -------------------------------------------------------------
+const mKey = d => d.slice(0, 7);
+const monthName = k => new Date(k + '-01T12:00:00').toLocaleDateString('de-AT', { month: 'long', year: 'numeric' });
+const nowKey = () => mKey(new Date().toISOString());
+let selMonth = null;            // 'YYYY-MM' or 'all'
+
+function monthsWithData() {
+  return [...new Set([...trips, ...fuel].map(x => mKey(x.date)))].sort();
+}
+function monthOptions() {
+  return [...new Set([...monthsWithData(), nowKey()])].sort().reverse();
+}
+const inScope = d => selMonth === 'all' || mKey(d) === selMonth;
+const scopeMonths = () => selMonth === 'all' ? monthsWithData() : [selMonth];
+
+function renderMonthBar() {
+  const opts = monthOptions();
+  if (!selMonth || (selMonth !== 'all' && !opts.includes(selMonth))) {
+    const withData = monthsWithData();
+    selMonth = withData.includes(nowKey()) || !withData.length ? nowKey() : withData[withData.length - 1];
+  }
+  $('#month').innerHTML = opts.map(k => `<option value="${k}">${monthName(k)}</option>`).join('')
+    + '<option value="all">Alle Monate</option>';
+  $('#month').value = selMonth;
+  const i = opts.indexOf(selMonth);
+  $('#prevMonth').disabled = selMonth === 'all' || i === opts.length - 1;
+  $('#nextMonth').disabled = selMonth === 'all' || i <= 0;
+}
+
+// B-km are only ever allocated within their own month, so a submitted month never changes later.
+function allocate(method) {
+  const share = new Map(), unallocByMonth = new Map();
+  for (const m of monthsWithData()) {
+    const a = trips.filter(t => t.cat === 'A' && mKey(t.date) === m);
+    const bSum = trips.filter(t => t.cat === 'B' && mKey(t.date) === m).reduce((s, t) => s + t.km, 0);
+    a.forEach(t => share.set(t.id, 0));
+    if (!bSum) continue;
+    if (!a.length) { unallocByMonth.set(m, bSum); continue; }
+    const w = method === 'equal' ? a.map(() => 1) : a.map(t => t.km);
+    distribute(bSum, w).forEach((v, i) => share.set(a[i].id, v));
+  }
+  return { share, unallocByMonth };
+}
+
+const fmtDate = d => d ? d.split('-').reverse().join('.') : '';
+const byDateTime = (x, y) => (x.date + (x.timeStart || '')).localeCompare(y.date + (y.timeStart || ''));
+const timeSpan = t => t.timeStart ? `${t.timeStart}–${t.timeEnd || '?'}` : '';
+const routeText = t => [t.from, ...(t.stops || []), t.to].filter(Boolean).join(' → ') + (t.roundTrip ? ' (hin & retour)' : '');
+const routeHtml = t => `${[t.from, ...(t.stops || []), t.to].filter(Boolean).map(esc).join(' → ')}
+  ${t.roundTrip ? `<span class="rt">⇄ hin & retour</span>` : ''}
+  ${t.detour ? `<span class="sub-note">Umweg: ${esc(t.detour)}</span>` : ''}`;
+const tripRow = (t, share) => `<tr>
+  <td>${fmtDate(t.date)}${t.timeStart ? `<span class="sub-note">${timeSpan(t)}</span>` : ''}</td><td>${routeHtml(t)}</td><td>${esc(t.purpose)}</td>
+  <td><span class="tag ${t.cat}">${t.cat}</span></td><td class="num">${fmt(t.km)}${t.odoEnd != null ? `<span class="sub-note">${fmtOdo(t.odoStart)} → ${fmtOdo(t.odoEnd)}</span>` : ''}</td>
+  ${share ? `<td class="num alloc">${t.cat === 'A' ? '+ ' + fmt(share.get(t.id) || 0) : '→ umgelegt'}</td>` : ''}
+  <td><button class="del" data-id="${t.id}" aria-label="Fahrt löschen">✕</button></td></tr>`;
+
+// Group items (sorted) into [[monthKey, items], ...] in chronological order.
+function byMonth(items) {
+  const g = new Map();
+  [...items].sort(byDateTime).forEach(x => { const k = mKey(x.date); g.has(k) || g.set(k, []); g.get(k).push(x); });
+  return [...g.entries()];
+}
+
+function renderFuel() {
+  const list = fuel.filter(x => inScope(x.date)).sort(byDateTime);
+  $('#fuelCount').textContent = list.length;
+  $('#fuelTitle').textContent = 'Tankungen – ' + (selMonth === 'all' ? 'alle Monate' : monthName(selMonth));
+  const liters = list.reduce((s, x) => s + x.liters, 0);
+  const cost = list.reduce((s, x) => s + x.cost, 0);
+  const km = trips.filter(t => inScope(t.date)).reduce((s, t) => s + t.km, 0);
+  $('#fuelStats').innerHTML = [
+    ['Getankt', num(liters) + ' l'], ['Kosten', eur(cost)],
+    ['Ø Preis pro Liter', liters ? eur(cost / liters) : '–'],
+    ['Ø Verbrauch', liters && km ? num(liters / km * 100, 1) + ' l/100 km' : '–'],
+    ['Kosten pro km', km ? eur(cost / km) : '–']
+  ].map(([l, v]) => `<div class="stat"><div class="v">${v}</div><div class="l">${l}</div></div>`).join('');
+  const row = x => `<tr><td>${fmtDate(x.date)}</td><td>${esc(x.station)}</td>
+      <td class="num">${num(x.liters)}</td><td class="num">${eur(x.cost)}</td><td class="num">${num(x.cost / x.liters, 3)}</td>
+      <td><button class="del" data-fuel-id="${x.id}" aria-label="Tankung löschen">✕</button></td></tr>`;
+  const sumRow = (label, xs, cls) => { const l = xs.reduce((s, x) => s + x.liters, 0), c = xs.reduce((s, x) => s + x.cost, 0);
+    return `<tr class="${cls}"><td colspan="2">${label} (${xs.length} Tankungen)</td><td class="num">${num(l)}</td><td class="num">${eur(c)}</td>
+      <td class="num">${l ? num(c / l, 3) : ''}</td><td></td></tr>`; };
+  const body = selMonth === 'all'
+    ? byMonth(list).map(([k, xs]) => `<tr class="mhead"><td colspan="6">${monthName(k)}</td></tr>${xs.map(row).join('')}${sumRow('Summe ' + monthName(k), xs, 'msum')}`).join('')
+    : list.map(row).join('');
+  $('#fuelTable').innerHTML = list.length ? `
+    <table><thead><tr><th>Datum</th><th>Tankstelle / Ort</th><th class="num">Liter</th><th class="num">Kosten</th><th class="num">€ / Liter</th><th></th></tr></thead>
+    <tbody>${body}</tbody><tfoot>${sumRow('Summe', list, '')}</tfoot></table>`
+    : '<div class="empty">Keine Tankungen in diesem Monat.</div>';
+}
+
+// Refuelling is linked to the first A trip on the same day (by start time).
+// Refuelling on a day without an A trip is reported separately, never dropped.
+function fuelForA(A, fuelList) {
+  const byTrip = new Map(), unassigned = { liters: 0, cost: 0, count: 0 };
+  for (const x of fuelList) {
+    const t = A.filter(a => a.date === x.date).sort(byDateTime)[0];
+    const slot = t ? (byTrip.get(t.id) || byTrip.set(t.id, { liters: 0, cost: 0 }).get(t.id)) : unassigned;
+    slot.liters += x.liters; slot.cost += x.cost; if (!t) unassigned.count++;
+  }
+  return { byTrip, unassigned };
+}
+
+// One block per month in scope: rows of A trips plus that month's totals.
+function allocBlocks(method) {
+  const { share, unallocByMonth } = allocate(method);
+  return scopeMonths().map(m => {
+    const A = trips.filter(t => t.cat === 'A' && mKey(t.date) === m).sort(byDateTime);
+    const bSum = trips.filter(t => t.cat === 'B' && mKey(t.date) === m).reduce((s, t) => s + t.km, 0);
+    const { byTrip, unassigned } = fuelForA(A, fuel.filter(x => mKey(x.date) === m));
+    const rows = A.map(t => {
+      const s = share.get(t.id) || 0, f = byTrip.get(t.id);
+      return { t, date: t.date, timeStart: t.timeStart || '', timeEnd: t.timeEnd || '',
+               odoStart: t.odoStart, odoEnd: t.odoEnd, km: t.km,
+               liters: f ? f.liters : null, cost: f ? f.cost : null,
+               route: routeText(t) + (t.detour ? ` (Umweg: ${t.detour})` : ''), purpose: t.purpose,
+               share: s, pct: t.km ? s / t.km * 100 : 0 };
+    });
+    const sum = k => rows.reduce((a, r) => a + (r[k] || 0), 0);
+    return { month: m, rows, bSum, unalloc: unallocByMonth.get(m) || 0, unassignedFuel: unassigned,
+             aSum: sum('km'), allocSum: sum('share'), liters: sum('liters'), cost: sum('cost') };
+  });
+}
+
+function render() {
+  renderMonthBar();
+  renderFuel();
+  const method = $('#method').value;
+  const { share } = allocate(method);
+  const scoped = trips.filter(t => inScope(t.date));
+  $('#tripCount').textContent = scoped.length;
+  const scopeLabel = selMonth === 'all' ? 'alle Monate' : monthName(selMonth);
+
+  // Eintragen: last 5 entered (by entry order)
+  const recent = trips.slice(-5).reverse();
+  $('#recentTable').innerHTML = recent.length ? `
+    <table><thead><tr><th>Datum</th><th>Strecke</th><th>Zweck</th><th>Kat.</th><th class="num">km</th><th></th></tr></thead>
+    <tbody>${recent.map(t => tripRow(t)).join('')}</tbody></table>`
+    : '<div class="empty">Noch keine Fahrten erfasst.</div>';
+
+  // Fahrten: month (or all months grouped), filterable, with totals
+  $('#tripsTitle').textContent = 'Fahrten – ' + scopeLabel;
+  const filter = $('#filter').value;
+  const shown = scoped.filter(t => filter === 'all' || t.cat === filter).sort(byDateTime);
+  const sumRow = (label, ts, cls) => {
+    const km = ts.reduce((s, t) => s + t.km, 0), sh = ts.reduce((s, t) => s + (t.cat === 'A' ? share.get(t.id) || 0 : 0), 0);
+    return `<tr class="${cls}"><td colspan="4">${label} (${ts.length} Fahrten)</td><td class="num">${fmt(km)}</td>
+      <td class="num alloc">${sh ? '+ ' + fmt(sh) : ''}</td><td></td></tr>`; };
+  const body = selMonth === 'all'
+    ? byMonth(shown).map(([k, ts]) => `<tr class="mhead"><td colspan="7">${monthName(k)}</td></tr>${ts.map(t => tripRow(t, share)).join('')}${sumRow('Summe ' + monthName(k), ts, 'msum')}`).join('')
+    : shown.map(t => tripRow(t, share)).join('');
+  $('#tripTable').innerHTML = shown.length ? `
+    <table><thead><tr><th>Datum</th><th>Strecke</th><th>Zweck</th><th>Kat.</th><th class="num">km</th><th class="num">Umlage</th><th></th></tr></thead>
+    <tbody>${body}</tbody><tfoot>${sumRow('Summe', shown, '')}</tfoot></table>`
+    : '<div class="empty">Keine Fahrten in diesem Monat.</div>';
+
+  // Umlage
+  $('#allocTitle').textContent = 'Umlage – ' + scopeLabel;
+  $('#methodNote').textContent = NOTES[method];
+  const blocks = allocBlocks(method);
+  const tot = k => blocks.reduce((s, b) => s + b[k], 0);
+  const aSum = tot('aSum'), bSum = tot('bSum'), allocSum = tot('allocSum'), unalloc = tot('unalloc');
+  const balanced = Math.abs(allocSum + unalloc - bSum) < 0.05;
+  $('#stats').innerHTML = [
+    ['A-Kilometer', fmt(aSum)], ['B-Kilometer', fmt(bSum)],
+    ['Umgelegt auf A', fmt(allocSum)], ['Nicht umlegbar', fmt(unalloc)],
+    ['Umlage-Quote', aSum ? pct(allocSum / aSum * 100) : '–'],
+    ['Abstimmung', balanced ? '<span class="check">B = umgelegt + offen ✓</span>' : '<span class="warn">Differenz!</span>']
+  ].map(([l, v]) => `<div class="stat"><div class="v">${v}</div><div class="l">${l}</div></div>`).join('');
+
+  const odo = v => v != null ? fmtOdo(v) : '';
+  const lit = v => v != null ? num(v) + ' l' : '';
+  const cur = v => v != null ? eur(v) : '';
+  const blockHtml = b => {
+    const notes = [
+      b.unalloc ? `${fmt(b.unalloc)} B-km nicht umlegbar (keine A-Fahrt in diesem Monat).` : '',
+      b.unassignedFuel.count ? `Nicht in der Tabelle: ${b.unassignedFuel.count} Tankung(en) an Tagen ohne A-Fahrt, zusammen ${num(b.unassignedFuel.liters)} l für ${eur(b.unassignedFuel.cost)} (siehe Tab „Tankungen“).` : ''
+    ].filter(Boolean).map(t => `<p class="note">${t}</p>`).join('');
+    return (selMonth === 'all' ? `<h3 class="month">${monthName(b.month)}</h3>` : '') + (b.rows.length ? `
+    <table><thead><tr><th>Datum</th><th>Uhrzeit Start</th><th>Uhrzeit Ende</th><th class="num">km-Stand Start</th><th class="num">km-Stand Ende</th>
+      <th class="num">Gefahrene km</th><th class="num">Getankte Liter</th><th class="num">Preis</th><th>Strecke</th><th>Zweck</th>
+      <th class="num">Umlage aus B</th><th class="num">Zuschlag</th></tr></thead>
+    <tbody>${b.rows.map(r => `<tr>
+      <td>${fmtDate(r.date)}</td><td>${r.timeStart}</td><td>${r.timeEnd}</td>
+      <td class="num">${odo(r.odoStart)}</td><td class="num">${odo(r.odoEnd)}</td><td class="num">${fmt(r.km)}</td>
+      <td class="num">${lit(r.liters)}</td><td class="num">${cur(r.cost)}</td>
+      <td>${routeHtml(r.t)}</td><td>${esc(r.purpose)}</td>
+      <td class="num alloc">+ ${fmt(r.share)}</td><td class="num">${pct(r.pct)}</td></tr>`).join('')}</tbody>
+    <tfoot><tr><td colspan="5">Summe ${monthName(b.month)} (${b.rows.length} A-Fahrten)</td><td class="num">${fmt(b.aSum)}</td>
+      <td class="num">${b.liters ? num(b.liters) + ' l' : ''}</td><td class="num">${b.cost ? eur(b.cost) : ''}</td><td colspan="2"></td>
+      <td class="num alloc">+ ${fmt(b.allocSum)}</td><td class="num">${b.aSum ? pct(b.allocSum / b.aSum * 100) : ''}</td></tr></tfoot>
+    </table>` : '<div class="empty">Keine A-Fahrten in diesem Monat.</div>') + notes;
+  };
+  $('#allocTable').innerHTML = blocks.length ? blocks.map(blockHtml).join('') : '<div class="empty">Keine Fahrten in diesem Monat.</div>';
+}
+
+$('#addForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const f = new FormData(e.target);
+  const odoStart = parseFloat(f.get('odoStart')), odoEnd = parseFloat(f.get('odoEnd'));
+  const stops = f.getAll('stop').map(s => s.trim()).filter(Boolean);
+  trips.push({ id: crypto.randomUUID(), date: f.get('date'), from: f.get('from').trim(), to: f.get('to').trim(),
+               stops, roundTrip: f.get('roundTrip') === 'on', detour: stops.length ? f.get('detour').trim() : '',
+               timeStart: f.get('timeStart'), timeEnd: f.get('timeEnd'),
+               purpose: f.get('purpose').trim(), cat: f.get('cat'), odoStart, odoEnd,
+               km: Math.round((odoEnd - odoStart) * 10) / 10 });
+  const last = trips[trips.length - 1];
+  save(); e.target.reset(); $('#stops').innerHTML = '';
+  e.target.date.valueAsDate = new Date(); prefillOdo(); render();
+  $('#savedMsg').innerHTML = `<span class="check">✓ Gespeichert:</span> ${fmtDate(last.date)}, ${esc(routeText(last))}, ${fmt(last.km)} km (${last.cat})`;
+});
+
+// Highest recorded end odometer = where the car stands now.
+const lastOdo = () => trips.reduce((m, t) => t.odoEnd != null && t.odoEnd > m ? t.odoEnd : m, -Infinity);
+const fmtOdo = n => n.toLocaleString('de-AT', { maximumFractionDigits:1 }) + ' km';
+
+function prefillOdo() {
+  const last = lastOdo();
+  $('#addForm').odoStart.value = Number.isFinite(last) ? last : '';
+  updateForm();
+}
+
+function updateForm() {
+  const form = $('#addForm');
+  const start = parseFloat(form.odoStart.value), end = parseFloat(form.odoEnd.value);
+  const last = lastOdo();
+  const ok = Number.isFinite(start) && Number.isFinite(end) && end > start;
+  form.odoEnd.setCustomValidity(Number.isFinite(start) && Number.isFinite(end) && !ok
+    ? 'Der Kilometerstand am Ende muss größer sein als am Start.' : '');
+  $('#kmTotal').textContent = ok ? fmt(end - start) + ' km' : '–';
+
+  let hint = '';
+  if (!Number.isFinite(last)) hint = 'Erste Fahrt mit Kilometerstand: bitte den Start-Kilometerstand vom Tacho eintragen.';
+  else if (!Number.isFinite(start)) hint = '';
+  else if (start === last) hint = `Start übernommen vom letzten Kilometerstand (${fmtOdo(last)}).`;
+  else if (start > last) hint = `<span class="warn">Lücke von ${fmt(start - last)} km</span> seit dem letzten Kilometerstand (${fmtOdo(last)}). Fehlt eine Fahrt?`;
+  else hint = `<span class="warn">Achtung:</span> Start liegt unter dem letzten Kilometerstand (${fmtOdo(last)}).`;
+  if (Number.isFinite(start) && Number.isFinite(end) && !ok) hint = '<span class="warn">Kilometerstand Ende muss größer als Start sein.</span>';
+  $('#odoHint').innerHTML = hint;
+  $('#detourWrap').hidden = !$('#stops').children.length;
+}
+$('#addStop').addEventListener('click', () => {
+  const n = $('#stops').children.length + 1;
+  const div = document.createElement('div');
+  div.className = 'stop';
+  div.innerHTML = `<label>Zwischenstopp ${n}<input name="stop" placeholder="z. B. St. Pölten"></label>
+    <button type="button" class="del" aria-label="Zwischenstopp entfernen">✕</button>`;
+  div.querySelector('button').addEventListener('click', ev => {
+    ev.stopPropagation(); div.remove();
+    [...$('#stops').children].forEach((s, i) => s.querySelector('label').firstChild.textContent = `Zwischenstopp ${i + 1}`);
+    updateForm();
+  });
+  $('#stops').appendChild(div); div.querySelector('input').focus(); updateForm();
+});
+$('#addForm').addEventListener('input', updateForm);
+document.addEventListener('click', e => {
+  const del = e.target.closest('.del');
+  if (del?.dataset.fuelId) { fuel = fuel.filter(x => x.id !== del.dataset.fuelId); saveFuel(); render(); return; }
+  if (del?.dataset.id) { trips = trips.filter(t => t.id !== del.dataset.id); save(); prefillOdo(); render(); return; }
+  const go = e.target.closest('[data-tab], [data-goto]');
+  if (go) showTab(go.dataset.tab || go.dataset.goto);
+});
+function showTab(name) {
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + name));
+  $('#monthBar').hidden = name === 'eintragen';
+}
+$('#method').addEventListener('change', render);
+$('#filter').addEventListener('change', render);
+$('#month').addEventListener('change', e => { selMonth = e.target.value; render(); });
+const stepMonth = dir => { const o = monthOptions(), i = o.indexOf(selMonth) - dir; if (o[i]) { selMonth = o[i]; render(); } };
+$('#prevMonth').addEventListener('click', () => stepMonth(-1));
+$('#nextMonth').addEventListener('click', () => stepMonth(1));
+$('#clearBtn').addEventListener('click', () => { if (confirm('Alle Fahrten löschen?')) { trips = []; save(); prefillOdo(); render(); } });
+$('#demoBtn').addEventListener('click', () => {
+  const d = [['2026-10-02','Wien','Linz','Kundentermin','A',185],['2026-10-05','Wien','Baden','Einkauf','B',28],
+             ['2026-10-09','Wien','St. Pölten','Workshop','A',64],['2026-10-14','Wien','Graz','Projektmeeting','A',198],
+             ['2026-10-18','Wien','Tulln','Besuch','B',41],['2026-11-03','Wien','Salzburg','Messe','A',298],
+             ['2026-11-11','Wien','Mödling','Sport','B',19],['2026-11-20','Wien','Eisenstadt','Kundentermin','A',59]];
+  let odo = 45210;
+  const times = ['07:30','09:15','08:00','06:45','14:10','07:00','17:30','08:20'];
+  trips = d.map(([date, from, to, purpose, cat, km], i) => ({ id: crypto.randomUUID(), date, from, to, purpose, cat, km,
+                                                           timeStart: times[i], timeEnd: addMin(times[i], Math.round(km * 0.9)),
+                                                           odoStart: odo, odoEnd: (odo += km) }));
+  save(); prefillOdo(); render();
+});
+const addMin = (hm, m) => { const [h, mi] = hm.split(':').map(Number), t = (h * 60 + mi + m) % 1440;
+  return String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0'); };
+$('#csvBtn').addEventListener('click', () => {
+  const blocks = allocBlocks($('#method').value);
+  const n = (v, d = 1) => v == null ? '' : v.toFixed(d).replace('.', ',');
+  const o = v => v == null ? '' : n(v, v % 1 ? 1 : 0);
+  const rows = [['Datum','Uhrzeit Start','Uhrzeit Ende','Kilometerstand Start','Kilometerstand Ende','Gefahrene Kilometer',
+                 'Getankte Liter','Preis (€)','Strecke','Zweck','Umlage aus B (km)','Zuschlag (%)']];
+  blocks.forEach((b, i) => {
+    if (i) rows.push([]);
+    b.rows.forEach(r => rows.push([fmtDate(r.date), r.timeStart, r.timeEnd, o(r.odoStart), o(r.odoEnd), n(r.km),
+                                   n(r.liters, 2), n(r.cost, 2), r.route, r.purpose, n(r.share), n(r.pct)]));
+    rows.push(['Summe ' + monthName(b.month), '', '', '', '', n(b.aSum), b.liters ? n(b.liters, 2) : '', b.cost ? n(b.cost, 2) : '',
+               '', '', n(b.allocSum), b.aSum ? n(b.allocSum / b.aSum * 100) : '']);
+    if (b.unalloc) rows.push([`Nicht umlegbar ${monthName(b.month)}: ${n(b.unalloc)} B-km (keine A-Fahrt im Monat)`]);
+  });
+  const csv = '﻿' + rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(';')).join('\n');
+  const name = selMonth === 'all' ? 'km-umlage-alle-monate.csv' : `km-umlage-${selMonth}.csv`;
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([csv], { type: 'text/csv' })), download: name });
+  a.click(); URL.revokeObjectURL(a.href);
+});
+
+$('#fuelForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const f = new FormData(e.target);
+  const x = { id: crypto.randomUUID(), date: f.get('date'), station: f.get('station').trim(),
+              liters: Math.round(parseFloat(f.get('liters')) * 100) / 100, cost: Math.round(parseFloat(f.get('cost')) * 100) / 100 };
+  fuel.push(x); saveFuel(); e.target.reset(); e.target.date.valueAsDate = new Date(); $('#fuelPrice').textContent = '–'; render();
+  $('#fuelMsg').innerHTML = `<span class="check">✓ Gespeichert:</span> ${fmtDate(x.date)}, ${num(x.liters)} l für ${eur(x.cost)} (${num(x.cost / x.liters, 3)} €/l)`;
+});
+$('#fuelForm').addEventListener('input', () => {
+  const f = $('#fuelForm'), l = parseFloat(f.liters.value), c = parseFloat(f.cost.value);
+  $('#fuelPrice').textContent = l > 0 && c > 0 ? num(c / l, 3) + ' €/l' : '–';
+});
+
+$('#addForm').date.valueAsDate = new Date();
+prefillOdo();
+$('#fuelForm').date.valueAsDate = new Date();
+render();
+</script>
+</body>
+</html>
