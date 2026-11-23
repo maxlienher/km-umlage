@@ -67,6 +67,9 @@
   tr.msum td { font-weight:700; border-bottom:2px solid var(--text); }
   h3.month { font-size:17px; margin:24px 0 8px; }
   [hidden] { display:none !important; }
+  .routecheck { background:#fef3c7; color:#78350f; border:1px solid #f59e0b; border-radius:10px; padding:10px 12px; font-size:14px; }
+  .routecheck.ok { background:transparent; color:var(--muted); border-color:var(--line); }
+  .flag { display:block; font-size:12px; color:#b45309; font-weight:600; }
   .reminder { background:#fef3c7; color:#78350f; border:1px solid #f59e0b; border-radius:var(--radius); padding:12px 16px; margin-bottom:16px; display:flex; gap:12px; align-items:center; justify-content:space-between; flex-wrap:wrap; }
   .reminder button { background:#78350f; }
   button, select, input, label { touch-action: manipulation; }
@@ -133,6 +136,7 @@
         <div class="total">Gefahren:&nbsp;<strong id="kmTotal">–</strong></div>
       </div>
       <p class="note" id="odoHint" style="margin:0"></p>
+      <div class="routecheck" id="routeHint" hidden></div>
 
       <button type="submit">Hinzufügen</button>
     </form>
@@ -308,9 +312,29 @@ const routeText = t => [t.from, ...(t.stops || []), t.to].filter(Boolean).join('
 const routeHtml = t => `${[t.from, ...(t.stops || []), t.to].filter(Boolean).map(esc).join(' → ')}
   ${t.roundTrip ? `<span class="rt">⇄ hin & retour</span>` : ''}
   ${t.detour ? `<span class="sub-note">Umweg: ${esc(t.detour)}</span>` : ''}`;
+// --- Plausibility: same route without stops should have about the same distance ---
+const ROUTE_TOL_PCT = 10, ROUTE_TOL_KM = 3;   // flag if off by more than 10 % and more than 3 km
+const norm = v => String(v || '').trim().toLowerCase().replace(/\s+/g, ' ');
+// Direction doesn't matter (Wien→Linz = Linz→Wien); round trips are compared per leg.
+const routeKey = t => (t.stops || []).length || !norm(t.from) || !norm(t.to) ? null : [norm(t.from), norm(t.to)].sort().join('|');
+const legKm = t => t.roundTrip ? t.km / 2 : t.km;
+const median = a => { const b = [...a].sort((x, y) => x - y), m = b.length >> 1; return b.length % 2 ? b[m] : (b[m - 1] + b[m]) / 2; };
+
+function routeCheck(t, excludeId) {
+  const key = routeKey(t);
+  if (!key || !(t.km > 0)) return null;
+  const refs = trips.filter(o => o.id !== excludeId && routeKey(o) === key).map(legKm);
+  if (!refs.length) return null;
+  const ref = median(refs), leg = legKm(t), diff = leg - ref, p = ref ? diff / ref * 100 : 0;
+  const off = Math.abs(diff) > ROUTE_TOL_KM && Math.abs(p) > ROUTE_TOL_PCT;
+  return { ref, n: refs.length, leg, diff, pct: p, off };
+}
+const flagNote = t => { const c = routeCheck(t, t.id);
+  return c && c.off ? `<span class="flag" title="Üblich auf dieser Strecke: ${fmt(c.ref)} km">⚠ ${c.diff > 0 ? '+' : ''}${fmt(c.diff)} km ggü. üblich (${fmt(c.ref)} km)</span>` : ''; };
+
 const tripRow = (t, share) => `<tr>
   <td>${fmtDate(t.date)}${t.timeStart ? `<span class="sub-note">${timeSpan(t)}</span>` : ''}</td><td>${routeHtml(t)}</td><td>${esc(t.purpose)}</td>
-  <td><span class="tag ${t.cat}">${t.cat}</span></td><td class="num">${fmt(t.km)}${t.odoEnd != null ? `<span class="sub-note">${fmtOdo(t.odoStart)} → ${fmtOdo(t.odoEnd)}</span>` : ''}</td>
+  <td><span class="tag ${t.cat}">${t.cat}</span></td><td class="num">${fmt(t.km)}${flagNote(t)}${t.odoEnd != null ? `<span class="sub-note">${fmtOdo(t.odoStart)} → ${fmtOdo(t.odoEnd)}</span>` : ''}</td>
   ${share ? `<td class="num alloc">${t.cat === 'A' ? '+ ' + fmt(share.get(t.id) || 0) : '→ umgelegt'}</td>` : ''}
   <td><button class="del" data-id="${t.id}" aria-label="Fahrt löschen">✕</button></td></tr>`;
 
@@ -457,6 +481,8 @@ function render() {
 
 $('#addForm').addEventListener('submit', e => {
   e.preventDefault();
+  const chk = routeCheck(formTrip(), null);
+  if (chk && chk.off && !confirm(`Die Distanz weicht um ${fmt(Math.abs(chk.diff))} km vom Üblichen auf dieser Strecke ab (${fmt(chk.ref)} km).\n\nOhne Zwischenstopp trotzdem speichern?`)) return;
   const f = new FormData(e.target);
   const odoStart = parseFloat(f.get('odoStart')), odoEnd = parseFloat(f.get('odoEnd'));
   const stops = f.getAll('stop').map(s => s.trim()).filter(Boolean);
@@ -499,6 +525,24 @@ function updateForm() {
   if (Number.isFinite(start) && Number.isFinite(end) && !ok) hint = '<span class="warn">Kilometerstand Ende muss größer als Start sein.</span>';
   $('#odoHint').innerHTML = hint;
   $('#detourWrap').hidden = !$('#stops').children.length;
+
+  const c = ok ? routeCheck(formTrip(), null) : null;
+  const rh = $('#routeHint');
+  rh.hidden = !c;
+  if (c) {
+    const per = form.roundTrip.checked ? ' pro Richtung' : '';
+    rh.className = 'routecheck' + (c.off ? '' : ' ok');
+    rh.innerHTML = c.off
+      ? `<strong>⚠ Ungewöhnliche Distanz.</strong> ${esc(form.from.value)} – ${esc(form.to.value)} hatte bisher üblicherweise <strong>${fmt(c.ref)} km</strong>${per} (${c.n} Fahrt${c.n > 1 ? 'en' : ''}). Diese Fahrt: ${fmt(c.leg)} km (${c.diff > 0 ? '+' : ''}${fmt(c.pct)} %). Kilometerstand prüfen oder Zwischenstopp mit Grund angeben.`
+      : `✓ Passt zu bisherigen Fahrten auf dieser Strecke (üblich ${fmt(c.ref)} km${per}).`;
+  }
+}
+
+function formTrip() {
+  const f = $('#addForm');
+  return { from: f.from.value, to: f.to.value, roundTrip: f.roundTrip.checked,
+           stops: [...f.querySelectorAll('[name=stop]')].map(i => i.value.trim()).filter(Boolean),
+           km: parseFloat(f.odoEnd.value) - parseFloat(f.odoStart.value) };
 }
 $('#addStop').addEventListener('click', () => {
   const n = $('#stops').children.length + 1;
