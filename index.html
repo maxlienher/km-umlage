@@ -67,6 +67,8 @@
   tr.msum td { font-weight:700; border-bottom:2px solid var(--text); }
   h3.month { font-size:17px; margin:24px 0 8px; }
   [hidden] { display:none !important; }
+  .reminder { background:#fef3c7; color:#78350f; border:1px solid #f59e0b; border-radius:var(--radius); padding:12px 16px; margin-bottom:16px; display:flex; gap:12px; align-items:center; justify-content:space-between; flex-wrap:wrap; }
+  .reminder button { background:#78350f; }
   button, select, input, label { touch-action: manipulation; }
   .tabs { display:grid; grid-template-columns: repeat(4, 1fr); }
   .tab { padding:8px 4px; min-height:44px; white-space:nowrap; -webkit-tap-highlight-color: transparent; }
@@ -87,6 +89,7 @@
   <p class="sub">Fahrten erfassen (Kategorie A oder B). B-Kilometer werden nach einem offenen Schlüssel auf A-Fahrten umgelegt, und jede Umlage bleibt sichtbar ausgewiesen.</p>
 
   <noscript><div class="noscript">Dieses Programm läuft hier nicht, weil JavaScript nicht ausgeführt wird. Das passiert in Vorschauen (z. B. WhatsApp, Mail, Dateien-App). Öffne die Datei in einem echten Browser wie Safari, Chrome oder Firefox.</div></noscript>
+  <div class="reminder" id="backupReminder" hidden></div>
   <nav class="tabs" role="tablist">
     <button class="tab active" data-tab="eintragen" role="tab">Eintragen</button>
     <button class="tab" data-tab="fahrten" role="tab">Fahrten <span class="count" id="tripCount">0</span></button>
@@ -159,6 +162,18 @@
     <div class="row" style="margin-top:12px">
       <button class="ghost" data-goto="fahrten">Alle Fahrten als Tabelle ansehen →</button>
     </div>
+  </section>
+
+  <section class="card" id="backupCard">
+    <h2>Daten sichern</h2>
+    <p class="note" style="margin-top:0">Deine Einträge sind nur in diesem Browser gespeichert. Sichere sie regelmäßig als Datei. Mit der Datei kannst du sie wiederherstellen, auch auf einem anderen Gerät.</p>
+    <p id="backupStatus"></p>
+    <div class="row">
+      <button type="button" id="backupBtn">Sichern (Datei speichern)</button>
+      <button type="button" class="ghost" id="restoreBtn">Wiederherstellen …</button>
+      <input type="file" id="restoreFile" accept=".json,application/json" hidden>
+    </div>
+    <p class="note" id="restoreMsg"></p>
   </section>
   </div>
 
@@ -369,6 +384,7 @@ function allocBlocks(method) {
 
 function render() {
   renderMonthBar();
+  if (typeof renderBackup === 'function') renderBackup();
   renderFuel();
   const method = $('#method').value;
   const { share } = allocate(method);
@@ -567,6 +583,75 @@ $('#fuelForm').addEventListener('input', () => {
 $('#addForm').date.valueAsDate = new Date();
 prefillOdo();
 $('#fuelForm').date.valueAsDate = new Date();
+// --- Backup / restore -----------------------------------------------------
+const BACKUP_KEY = 'km-umlage-last-backup';
+const BACKUP_DAYS = 14;
+const lastBackup = () => { try { return localStorage.getItem(BACKUP_KEY); } catch { return null; } };
+
+function renderBackup() {
+  const last = lastBackup();
+  const days = last ? Math.floor((Date.now() - new Date(last)) / 864e5) : null;
+  const hasData = trips.length + fuel.length > 0;
+  $('#backupStatus').innerHTML = last
+    ? `Letzte Sicherung: <strong>${new Date(last).toLocaleString('de-AT', { dateStyle: 'medium', timeStyle: 'short' })}</strong>${days >= BACKUP_DAYS ? ' <span class="warn">– bitte neu sichern</span>' : ''}`
+    : (hasData ? '<span class="warn">Noch nie gesichert.</span>' : 'Noch keine Daten zum Sichern.');
+  const due = hasData && (days === null || days >= BACKUP_DAYS);
+  const r = $('#backupReminder');
+  r.hidden = !due;
+  if (due) r.innerHTML = `<span>${last ? `Deine letzte Sicherung ist ${days} Tage her.` : 'Deine Daten sind noch nicht gesichert.'}</span>
+    <button type="button" id="reminderBackup">Jetzt sichern</button>`;
+}
+
+function backup() {
+  const data = { app: 'km-umlage', version: 1, exported: new Date().toISOString(), trips, fuel };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const a = Object.assign(document.createElement('a'), {
+    href: URL.createObjectURL(blob), download: `km-umlage-sicherung-${new Date().toISOString().slice(0, 10)}.json` });
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  localStorage.setItem(BACKUP_KEY, new Date().toISOString());
+  renderBackup();
+}
+
+// Only accept entries that look like ours; everything else is skipped and counted.
+const isDate = v => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
+const isNum = v => typeof v === 'number' && Number.isFinite(v);
+const validTrip = t => t && typeof t.id === 'string' && isDate(t.date) && (t.cat === 'A' || t.cat === 'B') && isNum(t.km) && t.km >= 0;
+const validFuel = x => x && typeof x.id === 'string' && isDate(x.date) && isNum(x.liters) && x.liters > 0 && isNum(x.cost) && x.cost >= 0;
+const cleanTrip = t => ({ id: t.id, date: t.date, cat: t.cat, km: t.km,
+  from: String(t.from ?? ''), to: String(t.to ?? ''), purpose: String(t.purpose ?? ''),
+  stops: Array.isArray(t.stops) ? t.stops.map(String) : [], roundTrip: !!t.roundTrip, detour: String(t.detour ?? ''),
+  timeStart: typeof t.timeStart === 'string' ? t.timeStart : '', timeEnd: typeof t.timeEnd === 'string' ? t.timeEnd : '',
+  ...(isNum(t.odoStart) && isNum(t.odoEnd) ? { odoStart: t.odoStart, odoEnd: t.odoEnd } : {}) });
+const cleanFuel = x => ({ id: x.id, date: x.date, liters: x.liters, cost: x.cost, station: String(x.station ?? '') });
+
+async function restore(file) {
+  const msg = $('#restoreMsg');
+  let data;
+  try { data = JSON.parse(await file.text()); } catch { msg.innerHTML = '<span class="warn">Die Datei ist keine gültige Sicherung.</span>'; return; }
+  if (!data || data.app !== 'km-umlage' || !Array.isArray(data.trips) || !Array.isArray(data.fuel)) {
+    msg.innerHTML = '<span class="warn">Das ist keine Sicherung aus diesem Tool.</span>'; return;
+  }
+  const inT = data.trips.filter(validTrip).map(cleanTrip), inF = data.fuel.filter(validFuel).map(cleanFuel);
+  const skipped = data.trips.length - inT.length + data.fuel.length - inF.length;
+  const haveT = new Set(trips.map(t => t.id)), haveF = new Set(fuel.map(x => x.id));
+  const newT = inT.filter(t => !haveT.has(t.id)), newF = inF.filter(x => !haveF.has(x.id));
+  const dup = inT.length - newT.length + inF.length - newF.length;
+  if (!newT.length && !newF.length) {
+    msg.innerHTML = `Nichts Neues: alle ${dup} Einträge aus der Sicherung sind schon vorhanden.${skipped ? ` ${skipped} ungültige Einträge übersprungen.` : ''}`; return;
+  }
+  if (!confirm(`Aus der Sicherung vom ${fmtDate((data.exported || '').slice(0, 10)) || '?'} übernehmen:\n` +
+               `${newT.length} Fahrten und ${newF.length} Tankungen.\n\nBestehende Einträge bleiben erhalten.`)) return;
+  trips = trips.concat(newT); fuel = fuel.concat(newF); save(); saveFuel(); prefillOdo(); render();
+  msg.innerHTML = `<span class="check">✓ Wiederhergestellt:</span> ${newT.length} Fahrten, ${newF.length} Tankungen.` +
+    (dup ? ` ${dup} waren schon vorhanden.` : '') + (skipped ? ` ${skipped} ungültige Einträge übersprungen.` : '');
+}
+
+$('#backupBtn').addEventListener('click', backup);
+$('#restoreBtn').addEventListener('click', () => $('#restoreFile').click());
+$('#restoreFile').addEventListener('change', e => { const f = e.target.files[0]; if (f) restore(f); e.target.value = ''; });
+document.addEventListener('click', e => { if (e.target.id === 'reminderBackup') backup(); });
+
 render();
 </script>
 </body>
