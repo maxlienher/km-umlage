@@ -477,16 +477,16 @@ function render() {
     return (selMonth === 'all' ? `<h3 class="month">${monthName(b.month)}</h3>` : '') + (b.rows.length ? `
     <table><thead><tr><th>Datum</th><th>Uhrzeit Start</th><th>Uhrzeit Ende</th><th class="num">km-Stand Start</th><th class="num">km-Stand Ende</th>
       <th class="num">Gefahrene km</th><th class="num">Getankte Liter</th><th class="num">Preis</th><th>Strecke</th><th>Zweck</th>
-      <th class="num">Umlage aus B</th><th class="num">Zuschlag</th></tr></thead>
+      <th class="num">Umlage aus B</th><th class="num">Zuschlag</th><th class="num">km inkl. Umlage</th></tr></thead>
     <tbody>${b.rows.map(r => `<tr>
       <td>${fmtDate(r.date)}</td><td>${r.timeStart}</td><td>${r.timeEnd}</td>
       <td class="num">${odo(r.odoStart)}</td><td class="num">${odo(r.odoEnd)}</td><td class="num">${fmt(r.km)}</td>
       <td class="num">${lit(r.liters)}</td><td class="num">${cur(r.cost)}</td>
       <td>${routeHtml(r.t)}</td><td>${esc(r.purpose)}</td>
-      <td class="num alloc">+ ${fmt(r.share)}</td><td class="num">${pct(r.pct)}</td></tr>`).join('')}</tbody>
+      <td class="num alloc">+ ${fmt(r.share)}</td><td class="num">${pct(r.pct)}</td><td class="num"><strong>${fmt(r.km + r.share)}</strong></td></tr>`).join('')}</tbody>
     <tfoot><tr><td colspan="5">Summe ${monthName(b.month)} (${b.rows.length} A-Fahrten)</td><td class="num">${fmt(b.aSum)}</td>
       <td class="num">${b.liters ? num(b.liters) + ' l' : ''}</td><td class="num">${b.cost ? eur(b.cost) : ''}</td><td colspan="2"></td>
-      <td class="num alloc">+ ${fmt(b.allocSum)}</td><td class="num">${b.aSum ? pct(b.allocSum / b.aSum * 100) : ''}</td></tr></tfoot>
+      <td class="num alloc">+ ${fmt(b.allocSum)}</td><td class="num">${b.aSum ? pct(b.allocSum / b.aSum * 100) : ''}</td><td class="num">${fmt(b.aSum + b.allocSum)}</td></tr></tfoot>
     </table>` : '<div class="empty">Keine A-Fahrten in diesem Monat.</div>') + notes;
   };
   $('#allocTable').innerHTML = blocks.length ? blocks.map(blockHtml).join('') : '<div class="empty">Keine Fahrten in diesem Monat.</div>';
@@ -689,13 +689,13 @@ $('#csvBtn').addEventListener('click', () => {
   const n = (v, d = 1) => v == null ? '' : v.toFixed(d).replace('.', ',');
   const o = v => v == null ? '' : n(v, v % 1 ? 1 : 0);
   const rows = [['Datum','Uhrzeit Start','Uhrzeit Ende','Kilometerstand Start','Kilometerstand Ende','Gefahrene Kilometer',
-                 'Getankte Liter','Preis (€)','Strecke','Zweck','Umlage aus B (km)','Zuschlag (%)']];
+                 'Getankte Liter','Preis (€)','Strecke','Zweck','Umlage aus B (km)','Zuschlag (%)','km inkl. Umlage']];
   blocks.forEach((b, i) => {
     if (i) rows.push([]);
     b.rows.forEach(r => rows.push([fmtDate(r.date), r.timeStart, r.timeEnd, o(r.odoStart), o(r.odoEnd), n(r.km),
-                                   n(r.liters, 2), n(r.cost, 2), r.route, r.purpose, n(r.share), n(r.pct)]));
+                                   n(r.liters, 2), n(r.cost, 2), r.route, r.purpose, n(r.share), n(r.pct), n(r.km + r.share)]));
     rows.push(['Summe ' + monthName(b.month), '', '', '', '', n(b.aSum), b.liters ? n(b.liters, 2) : '', b.cost ? n(b.cost, 2) : '',
-               '', '', n(b.allocSum), b.aSum ? n(b.allocSum / b.aSum * 100) : '']);
+               '', '', n(b.allocSum), b.aSum ? n(b.allocSum / b.aSum * 100) : '', n(b.aSum + b.allocSum)]);
     if (b.unalloc) rows.push([`Nicht umlegbar ${monthName(b.month)}: ${n(b.unalloc)} B-km (keine A-Fahrt im Monat)`]);
   });
   const csv = '﻿' + rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(';')).join('\n');
